@@ -116,7 +116,7 @@ vector<pair<int, int>> generate_initial_solution(vector<pair<int, int>>& final_a
         }
 
         // 簡易探索 (Phase 1は回数固定)
-        for (int iter = 0; iter < 1000; ++iter) {
+        for (int iter = 0; iter < 100; ++iter) {
             ll sc = calc(ans, sab);
             if (sc < ideal_score) {
                 final_ans = ans;
@@ -163,13 +163,26 @@ void run_local_search(vector<pair<int, int>>& ans, ll& ideal_score, vector<pair<
     ll sc = calc(ans, sab);
     ll loop_cnt = 0;
 
+    // --- 焼きなましパラメータ ---
+    // start_temp: 初期温度。1回の操作で変動するスコアの幅(delta)と同程度に設定するのが定石。
+    // deltaが数百〜数千オーダーと予想されるため、2000程度に設定（調整推奨）。
+    double start_temp = 3000.0;
+    double end_temp = 0.0;
+    double temp = start_temp;
+    double time_limit = 1950.0; // TimeKeeperの制限時間と合わせる
+    // -------------------------
+
     // 時間いっぱいループする
     while (true) {
         loop_cnt++;
-        // 毎回時間を取得すると重いので、128回に1回チェックする
+        // 毎回時間を取得すると重いので、128回に1回チェック＆温度更新
         if ((loop_cnt & 127) == 0) {
             tk.setNowTime();
             if (tk.isTimeOver()) break;
+
+            // 温度更新 (線形冷却: 時間経過とともに start -> end へ下がる)
+            double progress = tk.getNowTime() / time_limit;
+            temp = start_temp + (end_temp - start_temp) * progress;
         }
 
         if (sc < ideal_score) {
@@ -184,10 +197,10 @@ void run_local_search(vector<pair<int, int>>& ans, ll& ideal_score, vector<pair<
         for (int k = 0; k < N; ++k) {
             int i = (cut + k) % N;
             if (sab[i] < sab[sabori]) {
-                if (rnd.nextInt(100) < 95) sabori = i;
+                if (rnd.nextInt(100) < 85) sabori = i;
             }
             if (sab[i] > sab[hataraki]) {
-                if (rnd.nextInt(100) < 95) hataraki = i;
+                if (rnd.nextInt(100) < 85) hataraki = i;
             }
         }
 
@@ -214,15 +227,31 @@ void run_local_search(vector<pair<int, int>>& ans, ll& ideal_score, vector<pair<
         vector<ll> new_sab(N);
         ll new_sc = calc(ans, new_sab);
 
-        bool improved = (sc > new_sc);
-        bool noise = (rnd.nextInt(100) >= 95);
+        // --- 焼きなまし法の採用判定 ---
+        ll delta = new_sc - sc; // スコア差分 (負なら改善)
+        bool accept = false;
 
-        if (improved ^ noise) {
+        if (delta <= 0) {
+            // 改善した場合は必ず採用
+            accept = true;
+        } else {
+            // 改悪した場合、確率 exp(-delta / temp) で採用
+            // 温度(temp)が高いほど、改悪幅(delta)が小さいほど採用されやすい
+            if (temp > 1e-9) { // ゼロ除算回避
+                double prob = exp(-((double)delta) / temp);
+                if (rnd.nextDouble() < prob) {
+                    accept = true;
+                }
+            }
+        }
+        // -----------------------------
+
+        if (accept) {
             // 採用
             sc = new_sc;
             sab = new_sab;
         } else {
-            // 棄却
+            // 棄却 (元に戻す)
             if (t_j == 0) ans[t_i].first = t_old;
             else ans[t_i].second = t_old;
         }
